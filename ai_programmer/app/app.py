@@ -174,6 +174,21 @@ HA_TOOLS = [
 
     # ── Automation Tools ──────────────────────────────────────────────────────
     {
+        "name": "ha_list_automations",
+        "description": (
+            "List all automations with their full configuration (triggers, conditions, actions). "
+            "Returns every automation's ID, alias, state, and config details. "
+            "Use this to see what automations already exist before creating or modifying them."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "automation_id": {"type": "string", "description": "Optional: get config for a single automation by entity_id (e.g. 'automation.morning_lights')."},
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "ha_create_automation",
         "description": "Create a new automation via the HA config API (no YAML editing needed).",
         "parameters": {
@@ -461,6 +476,38 @@ async def execute_tool(name: str, inp: dict) -> str:
             return json.dumps({"success": True, "total_entries": len(existing)})
 
         # ── Automation ────────────────────────────────────────────────────────
+        elif name == "ha_list_automations":
+            single_id = inp.get("automation_id")
+            if single_id:
+                state = await ha_get(f"/api/states/{single_id}")
+                if isinstance(state, dict) and "entity_id" in state:
+                    return json.dumps({
+                        "entity_id": state["entity_id"],
+                        "state": state["state"],
+                        "alias": state.get("attributes", {}).get("friendly_name", ""),
+                        "last_triggered": state.get("attributes", {}).get("last_triggered"),
+                        "mode": state.get("attributes", {}).get("mode"),
+                        "attributes": state.get("attributes", {}),
+                    }, indent=2)
+                return json.dumps({"error": f"Automation not found: {single_id}"})
+            # List all automations
+            states = await ha_get("/api/states")
+            automations = []
+            if isinstance(states, list):
+                for s in states:
+                    eid = s.get("entity_id", "")
+                    if eid.startswith("automation."):
+                        attrs = s.get("attributes", {})
+                        automations.append({
+                            "entity_id": eid,
+                            "state": s["state"],
+                            "alias": attrs.get("friendly_name", ""),
+                            "last_triggered": attrs.get("last_triggered"),
+                            "mode": attrs.get("mode", "single"),
+                            "current": attrs.get("current", 0),
+                        })
+            return json.dumps({"count": len(automations), "automations": automations}, indent=2)
+
         elif name == "ha_create_automation":
             result = await ha_post(f"/api/config/automation/config/{inp['automation_id']}", inp["config"])
             return json.dumps(result) if isinstance(result, (dict, list)) else str(result)
@@ -689,6 +736,7 @@ You are HA AI Programmer, an expert Home Assistant developer with full system ac
 You have powerful tools to:
 - Read and write ANY file in the HA config directory (YAML, JSON, Python, etc.)
 - Control all devices via service calls
+- List and inspect all existing automations (use ha_list_automations FIRST before creating new ones)
 - Create automations, scripts, and scenes
 - Generate reusable Blueprints
 - Build and modify Lovelace dashboards (add cards, views, themes)
@@ -698,6 +746,7 @@ You have powerful tools to:
 - Render Jinja2 templates
 
 IMPORTANT GUIDELINES:
+- Before creating any automation, ALWAYS call ha_list_automations first to see what already exists.
 - Before editing ANY file, always READ it first to understand the current state.
 - After writing a file, use ha_check_config to validate before reloading.
 - After creating/editing automations, reload them with ha_reload.

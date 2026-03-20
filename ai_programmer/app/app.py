@@ -250,14 +250,30 @@ HA_TOOLS = [
     },
     {
         "name": "ha_update_dashboard",
-        "description": "Update a Lovelace dashboard with a new config (views, cards, etc).",
+        "description": (
+            "Update a Lovelace dashboard. CRITICAL: You MUST include ALL existing views in the config, "
+            "not just the ones you're changing. Always read the full config with ha_get_dashboard_config first, "
+            "then modify the specific view/card you need while keeping everything else intact. "
+            "A backup is automatically created before every write."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "dashboard_id": {"type": "string", "description": "Dashboard URL path."},
-                "config": {"type": "object", "description": "Full Lovelace config with views and cards."},
+                "config": {"type": "object", "description": "Full Lovelace config with ALL views and cards (not just the changed ones)."},
             },
             "required": ["dashboard_id", "config"],
+        },
+    },
+    {
+        "name": "ha_restore_dashboard",
+        "description": "Restore a dashboard from its backup file (created automatically before each update).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "dashboard_id": {"type": "string", "description": "Dashboard URL path to restore."},
+            },
+            "required": ["dashboard_id"],
         },
     },
 
@@ -437,8 +453,8 @@ async def execute_tool(name: str, inp: dict) -> str:
             if not fpath.exists():
                 return json.dumps({"error": f"File not found: {inp['path']}"})
             content = fpath.read_text()
-            if len(content) > 10000:
-                content = content[:10000] + "\n\n... (truncated, file is " + str(len(content)) + " chars)"
+            if len(content) > 50000:
+                content = content[:50000] + "\n\n... (truncated, file is " + str(len(content)) + " chars. Use ha_read_file_chunk to read specific sections.)"
             return content
 
         elif name == "ha_write_file":
@@ -608,7 +624,32 @@ async def execute_tool(name: str, inp: dict) -> str:
             sf = storage_dir / fname
             if sf.exists():
                 try:
-                    sdata = json.loads(sf.read_text())
+                    original_text = sf.read_text()
+                    sdata = json.loads(original_text)
+                    old_config = sdata.get("data", {}).get("config", {})
+                    old_views = len(old_config.get("views", []))
+                    new_views = len(config.get("views", []))
+                    # Safety check: refuse if new config has significantly fewer views
+                    if old_views > 0 and new_views < old_views:
+                        return json.dumps({
+                            "error": f"SAFETY BLOCK: New config has {new_views} views but original has {old_views}. "
+                            f"This would delete {old_views - new_views} view(s). "
+                            f"To modify a dashboard, you MUST include ALL existing views in the config, not just the ones you're changing. "
+                            f"Read the full dashboard config first with ha_get_dashboard_config, then add/modify views while keeping all others intact.",
+                            "original_views": old_views,
+                            "new_views": new_views,
+                        })
+                    # Safety check: refuse if new config is much smaller (likely truncated data)
+                    new_text = json.dumps(config)
+                    old_text = json.dumps(old_config)
+                    if len(old_text) > 1000 and len(new_text) < len(old_text) * 0.5:
+                        return json.dumps({
+                            "error": f"SAFETY BLOCK: New config is {len(new_text)} chars but original is {len(old_text)} chars ({len(new_text)/len(old_text)*100:.0f}%). "
+                            f"This looks like data loss from a truncated read. Read the FULL config first, then make targeted changes.",
+                        })
+                    # Create backup before writing
+                    backup_path = sf.with_name(f"{sf.name}.backup")
+                    shutil.copy2(sf, backup_path)
                     sdata["data"]["config"] = config
                     sf.write_text(json.dumps(sdata, indent=2))
                     # Reload lovelace to pick up changes
@@ -616,9 +657,17 @@ async def execute_tool(name: str, inp: dict) -> str:
                         await ha_post("/api/services/lovelace/reload_resources")
                     except Exception:
                         pass
-                    return json.dumps({"success": True, "method": ".storage", "file": fname, "note": "Refresh the dashboard in your browser to see changes."})
+                    return json.dumps({
+                        "success": True, "method": ".storage", "file": fname,
+                        "backup": str(backup_path.relative_to(Path(HA_CONFIG_DIR))),
+                        "views_before": old_views, "views_after": new_views,
+                        "note": "Backup saved. Refresh the dashboard in your browser to see changes."
+                    })
+                except json.JSONDecodeError as e:
+                    return json.dumps({"error": f"Invalid JSON in config: {e}"})
                 except Exception as e:
                     print(f"[WARN] .storage write failed: {e}")
+                    return json.dumps({"error": f"Write failed: {str(e)}"})
             # Fallback: Try the API
             try:
                 endpoint = "/api/lovelace/config" if did == "lovelace" else f"/api/lovelace/config/{did}"
@@ -626,6 +675,24 @@ async def execute_tool(name: str, inp: dict) -> str:
                 return json.dumps(result) if isinstance(result, (dict, list)) else str(result)
             except Exception as e:
                 return json.dumps({"error": f"Could not update dashboard '{did}': {str(e)}"})
+
+        elif name == "ha_restore_dashboard":
+            did = inp.get("dashboard_id", "lovelace")
+            storage_dir = Path(HA_CONFIG_DIR) / ".storage"
+            fname = "lovelace" if did == "lovelace" else f"lovelace.{did}"
+            sf = storage_dir / fname
+            backup = sf.with_name(f"{sf.name}.backup")
+            if not backup.exists():
+                return json.dumps({"error": f"No backup found for dashboard '{did}'. Expected: .storage/{fname}.backup"})
+            try:
+                shutil.copy2(backup, sf)
+                try:
+                    await ha_post("/api/services/lovelace/reload_resources")
+                except Exception:
+                    pass
+                return json.dumps({"success": True, "restored_from": str(backup.relative_to(Path(HA_CONFIG_DIR))), "note": "Dashboard restored. Refresh your browser."})
+            except Exception as e:
+                return json.dumps({"error": f"Restore failed: {str(e)}"})
 
         # ── HACS ──────────────────────────────────────────────────────────────
         elif name == "ha_hacs_list_repos":
@@ -838,6 +905,7 @@ IMPORTANT GUIDELINES:
 - Explain what you're doing and why, in plain language.
 - When creating dashboards, use modern card types and explain the layout.
 - You CAN read and modify storage-mode dashboards. Use ha_get_dashboard_config with the url_path (e.g. 'mi-tierra-controls') to read them, and ha_update_dashboard to write changes. Never tell the user you can't modify storage dashboards — you can.
+- CRITICAL DASHBOARD SAFETY: When updating a dashboard, you MUST include ALL existing views in the config. Never submit a partial config. Always read the full config first, then add/modify the specific view or card while preserving everything else. A backup is created automatically before each write. If something goes wrong, use ha_restore_dashboard to roll back.
 - When generating blueprints, include clear input descriptions and selectors.
 - Be proactive about suggesting improvements you notice.
 """

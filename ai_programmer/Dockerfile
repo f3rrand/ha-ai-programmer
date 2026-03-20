@@ -32,5 +32,10 @@ RUN apk del gcc musl-dev python3-dev libffi-dev openssl-dev
 # Copy application
 COPY app/ /app/
 
-# Copy s6-overlay service definition
-COPY rootfs /
+WORKDIR /app
+
+# Copy startup script
+COPY run.sh /run.sh
+RUN chmod a+x /run.sh
+
+CMD [ "/run.sh" ]

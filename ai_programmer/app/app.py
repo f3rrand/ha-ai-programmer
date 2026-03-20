@@ -531,79 +531,101 @@ async def execute_tool(name: str, inp: dict) -> str:
         # ── Dashboards / Lovelace ─────────────────────────────────────────────
         elif name == "ha_get_dashboards":
             dashboards = []
-            # Method 1: Try the API
-            try:
-                result = await ha_get("/api/lovelace/dashboards")
-                if isinstance(result, list):
-                    dashboards = result
-            except Exception as e:
-                print(f"[WARN] Lovelace dashboards API failed: {e}")
-            # Method 2: Read from .storage file (more reliable for add-ons)
+            # Primary: Read .storage/lovelace_dashboards directly (always works for add-ons)
             storage_dash = Path(HA_CONFIG_DIR) / ".storage" / "lovelace_dashboards"
             if storage_dash.exists():
                 try:
                     sdata = json.loads(storage_dash.read_text())
                     for item in sdata.get("data", {}).get("items", []):
-                        existing_paths = [d.get("url_path") for d in dashboards]
-                        if item.get("url_path") not in existing_paths:
-                            dashboards.append({
-                                "id": item.get("id", ""),
-                                "url_path": item.get("url_path", ""),
-                                "title": item.get("title", ""),
-                                "mode": item.get("mode", "storage"),
-                                "source": ".storage"
-                            })
+                        dashboards.append({
+                            "id": item.get("id", ""),
+                            "url_path": item.get("url_path", ""),
+                            "title": item.get("title", ""),
+                            "mode": item.get("mode", "storage"),
+                        })
                 except Exception as e:
                     print(f"[WARN] .storage/lovelace_dashboards read failed: {e}")
             # Always include the default dashboard
-            default_exists = any(d.get("url_path") == "lovelace" for d in dashboards)
-            if not default_exists:
-                dashboards.insert(0, {"id": None, "url_path": "lovelace", "title": "Overview (default)", "mode": "storage"})
-            # Method 3: Check for YAML dashboard files
+            dashboards.insert(0, {"url_path": "lovelace", "title": "Overview (default)", "mode": "storage"})
+            # Scan .storage for all lovelace config files
+            storage_dir = Path(HA_CONFIG_DIR) / ".storage"
+            if storage_dir.exists():
+                lovelace_files = sorted([f.name for f in storage_dir.iterdir() if f.name.startswith("lovelace")])
+                for d in dashboards:
+                    up = d.get("url_path", "")
+                    fname = "lovelace" if up == "lovelace" else f"lovelace.{up}"
+                    d["config_file_exists"] = fname in lovelace_files
+                dashboards.append({"_storage_lovelace_files": lovelace_files})
+            # Also check for YAML dashboard files
             dash_dir = Path(HA_CONFIG_DIR) / "dashboards"
             if dash_dir.exists():
                 for f in dash_dir.glob("*.yaml"):
-                    dashboards.append({"id": f.stem, "url_path": f.stem, "title": f.stem, "mode": "yaml", "file": str(f.relative_to(HA_CONFIG_DIR))})
+                    dashboards.append({"url_path": f.stem, "title": f.stem, "mode": "yaml", "file": str(f.relative_to(HA_CONFIG_DIR))})
             return json.dumps(dashboards, indent=2)
 
         elif name == "ha_get_dashboard_config":
             did = inp.get("dashboard_id", "lovelace")
-            errors = []
-            # Method 1: Try the API
+            # Primary: Read directly from .storage (most reliable for add-ons)
+            storage_dir = Path(HA_CONFIG_DIR) / ".storage"
+            # Try exact match first, then scan for partial matches
+            candidates = [
+                storage_dir / ("lovelace" if did == "lovelace" else f"lovelace.{did}"),
+            ]
+            # Also scan for any file containing the dashboard id
+            if storage_dir.exists():
+                for f in storage_dir.iterdir():
+                    if f.name.startswith("lovelace") and did in f.name and f not in candidates:
+                        candidates.append(f)
+            for sf in candidates:
+                if sf.exists():
+                    try:
+                        sdata = json.loads(sf.read_text())
+                        config = sdata.get("data", {}).get("config", sdata.get("data", {}))
+                        return json.dumps({"source": sf.name, "config": config}, indent=2)
+                    except Exception as e:
+                        print(f"[WARN] Failed to read {sf}: {e}")
+            # Fallback: Try the API
             try:
                 endpoint = "/api/lovelace/config" if did == "lovelace" else f"/api/lovelace/config/{did}"
                 result = await ha_get(endpoint)
                 return json.dumps(result, indent=2)
             except Exception as e:
-                errors.append(f"API: {e}")
-            # Method 2: Read from .storage files (HA stores UI dashboards here)
-            storage_files = [
-                Path(HA_CONFIG_DIR) / ".storage" / f"lovelace.{did}",
-                Path(HA_CONFIG_DIR) / ".storage" / "lovelace",  # default dashboard
-            ]
-            for sf in storage_files:
-                if sf.exists():
-                    try:
-                        sdata = json.loads(sf.read_text())
-                        config = sdata.get("data", {}).get("config", sdata.get("data", {}))
-                        return json.dumps(config, indent=2)
-                    except Exception as e:
-                        errors.append(f".storage/{sf.name}: {e}")
-            # Method 3: YAML files
-            yaml_paths = [
-                Path(HA_CONFIG_DIR) / "dashboards" / f"{did}.yaml",
-                Path(HA_CONFIG_DIR) / "ui-lovelace.yaml",
-            ]
-            for yp in yaml_paths:
+                pass
+            # Fallback: YAML files
+            for yp in [Path(HA_CONFIG_DIR) / "dashboards" / f"{did}.yaml", Path(HA_CONFIG_DIR) / "ui-lovelace.yaml"]:
                 if yp.exists():
                     return yp.read_text()
-            return json.dumps({"error": f"Could not load dashboard '{did}'. Tried: {'; '.join(errors)}. Check .storage and dashboards/ directory."})
+            # List what files actually exist to help debug
+            existing = [f.name for f in storage_dir.iterdir() if f.name.startswith("lovelace")] if storage_dir.exists() else []
+            return json.dumps({"error": f"Dashboard '{did}' not found.", "available_storage_files": existing, "hint": "Use the url_path from ha_get_dashboards as the dashboard_id."})
 
         elif name == "ha_update_dashboard":
             did = inp.get("dashboard_id", "lovelace")
-            endpoint = "/api/lovelace/config" if did == "lovelace" else f"/api/lovelace/config/{did}"
-            result = await ha_post(endpoint, inp["config"])
-            return json.dumps(result) if isinstance(result, (dict, list)) else str(result)
+            config = inp["config"]
+            # Primary: Write directly to .storage file
+            storage_dir = Path(HA_CONFIG_DIR) / ".storage"
+            fname = "lovelace" if did == "lovelace" else f"lovelace.{did}"
+            sf = storage_dir / fname
+            if sf.exists():
+                try:
+                    sdata = json.loads(sf.read_text())
+                    sdata["data"]["config"] = config
+                    sf.write_text(json.dumps(sdata, indent=2))
+                    # Reload lovelace to pick up changes
+                    try:
+                        await ha_post("/api/services/lovelace/reload_resources")
+                    except Exception:
+                        pass
+                    return json.dumps({"success": True, "method": ".storage", "file": fname, "note": "Refresh the dashboard in your browser to see changes."})
+                except Exception as e:
+                    print(f"[WARN] .storage write failed: {e}")
+            # Fallback: Try the API
+            try:
+                endpoint = "/api/lovelace/config" if did == "lovelace" else f"/api/lovelace/config/{did}"
+                result = await ha_post(endpoint, config)
+                return json.dumps(result) if isinstance(result, (dict, list)) else str(result)
+            except Exception as e:
+                return json.dumps({"error": f"Could not update dashboard '{did}': {str(e)}"})
 
         # ── HACS ──────────────────────────────────────────────────────────────
         elif name == "ha_hacs_list_repos":
@@ -799,7 +821,7 @@ You have powerful tools to:
 - List and inspect all existing automations (use ha_list_automations FIRST before creating new ones)
 - Create automations, scripts, and scenes
 - Generate reusable Blueprints
-- Build and modify Lovelace dashboards (add cards, views, themes)
+- Build and modify Lovelace dashboards (add cards, views, themes) — INCLUDING storage-mode dashboards by reading/writing .storage files directly
 - Install HACS repositories and custom components from GitHub
 - Check config validity, reload components, and restart HA
 - Read error logs, entity history, and system info
@@ -815,6 +837,7 @@ IMPORTANT GUIDELINES:
 - Use modern HA syntax: plural keys (triggers, conditions, actions), target instead of entity_id in data.
 - Explain what you're doing and why, in plain language.
 - When creating dashboards, use modern card types and explain the layout.
+- You CAN read and modify storage-mode dashboards. Use ha_get_dashboard_config with the url_path (e.g. 'mi-tierra-controls') to read them, and ha_update_dashboard to write changes. Never tell the user you can't modify storage dashboards — you can.
 - When generating blueprints, include clear input descriptions and selectors.
 - Be proactive about suggesting improvements you notice.
 """

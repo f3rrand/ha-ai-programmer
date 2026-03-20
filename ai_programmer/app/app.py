@@ -239,11 +239,15 @@ HA_TOOLS = [
     },
     {
         "name": "ha_get_dashboard_config",
-        "description": "Get the full Lovelace config for a dashboard.",
+        "description": (
+            "Get the Lovelace config for a dashboard. Can return the full config or just a specific view/tab by index or title. "
+            "Returns YAML format for easy reading."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "dashboard_id": {"type": "string", "description": "Dashboard URL path, e.g. 'lovelace' for the default, or a custom dashboard ID."}
+                "dashboard_id": {"type": "string", "description": "Dashboard URL path, e.g. 'lovelace' for the default, or 'mi-tierra-controls' for a custom one."},
+                "view": {"type": "string", "description": "Optional: view title (e.g. 'Media') or index (e.g. '0') to return only that view instead of the full config."},
             },
             "required": ["dashboard_id"],
         },
@@ -251,16 +255,17 @@ HA_TOOLS = [
     {
         "name": "ha_update_dashboard",
         "description": (
-            "Update a Lovelace dashboard. CRITICAL: You MUST include ALL existing views in the config, "
-            "not just the ones you're changing. Always read the full config with ha_get_dashboard_config first, "
-            "then modify the specific view/card you need while keeping everything else intact. "
-            "A backup is automatically created before every write."
+            "Update a Lovelace dashboard. SAFETY RULES: "
+            "1) Always read the FULL config with ha_get_dashboard_config first. "
+            "2) Include ALL existing views — if the original has 5 views, your update must have at least 5. "
+            "3) Only modify the specific view/card needed, keep everything else EXACTLY as-is. "
+            "4) A backup is created automatically before each write."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "dashboard_id": {"type": "string", "description": "Dashboard URL path."},
-                "config": {"type": "object", "description": "Full Lovelace config with ALL views and cards (not just the changed ones)."},
+                "dashboard_id": {"type": "string", "description": "Dashboard URL path (e.g. 'mi-tierra-controls')."},
+                "config": {"type": "object", "description": "Full Lovelace config with ALL views and cards."},
             },
             "required": ["dashboard_id", "config"],
         },
@@ -581,13 +586,14 @@ async def execute_tool(name: str, inp: dict) -> str:
 
         elif name == "ha_get_dashboard_config":
             did = inp.get("dashboard_id", "lovelace")
+            view_filter = inp.get("view", None)
+            config = None
+            source = None
             # Primary: Read directly from .storage (most reliable for add-ons)
             storage_dir = Path(HA_CONFIG_DIR) / ".storage"
-            # Try exact match first, then scan for partial matches
             candidates = [
                 storage_dir / ("lovelace" if did == "lovelace" else f"lovelace.{did}"),
             ]
-            # Also scan for any file containing the dashboard id
             if storage_dir.exists():
                 for f in storage_dir.iterdir():
                     if f.name.startswith("lovelace") and did in f.name and f not in candidates:
@@ -597,84 +603,104 @@ async def execute_tool(name: str, inp: dict) -> str:
                     try:
                         sdata = json.loads(sf.read_text())
                         config = sdata.get("data", {}).get("config", sdata.get("data", {}))
-                        return json.dumps({"source": sf.name, "config": config}, indent=2)
+                        source = sf.name
+                        break
                     except Exception as e:
                         print(f"[WARN] Failed to read {sf}: {e}")
             # Fallback: Try the API
-            try:
-                endpoint = "/api/lovelace/config" if did == "lovelace" else f"/api/lovelace/config/{did}"
-                result = await ha_get(endpoint)
-                return json.dumps(result, indent=2)
-            except Exception as e:
-                pass
+            if config is None:
+                try:
+                    endpoint = "/api/lovelace/config" if did == "lovelace" else f"/api/lovelace/config/{did}"
+                    config = await ha_get(endpoint)
+                    source = "api"
+                except Exception:
+                    pass
             # Fallback: YAML files
-            for yp in [Path(HA_CONFIG_DIR) / "dashboards" / f"{did}.yaml", Path(HA_CONFIG_DIR) / "ui-lovelace.yaml"]:
-                if yp.exists():
-                    return yp.read_text()
-            # List what files actually exist to help debug
-            existing = [f.name for f in storage_dir.iterdir() if f.name.startswith("lovelace")] if storage_dir.exists() else []
-            return json.dumps({"error": f"Dashboard '{did}' not found.", "available_storage_files": existing, "hint": "Use the url_path from ha_get_dashboards as the dashboard_id."})
+            if config is None:
+                for yp in [Path(HA_CONFIG_DIR) / "dashboards" / f"{did}.yaml", Path(HA_CONFIG_DIR) / "ui-lovelace.yaml"]:
+                    if yp.exists():
+                        return yp.read_text()
+            if config is None:
+                existing = [f.name for f in storage_dir.iterdir() if f.name.startswith("lovelace")] if storage_dir.exists() else []
+                return json.dumps({"error": f"Dashboard '{did}' not found.", "available_storage_files": existing, "hint": "Use the url_path from ha_get_dashboards as the dashboard_id."})
+            # View filtering
+            views = config.get("views", [])
+            if view_filter is not None:
+                # Try by index first
+                try:
+                    idx = int(view_filter)
+                    if 0 <= idx < len(views):
+                        view_data = views[idx]
+                        result = {"source": source, "dashboard_id": did, "view_index": idx, "view_title": view_data.get("title", ""), "total_views": len(views), "view": view_data}
+                        return yaml.dump(result, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                except ValueError:
+                    pass
+                # Try by title
+                for idx, v in enumerate(views):
+                    if v.get("title", "").lower() == view_filter.lower():
+                        result = {"source": source, "dashboard_id": did, "view_index": idx, "view_title": v.get("title", ""), "total_views": len(views), "view": v}
+                        return yaml.dump(result, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                return json.dumps({"error": f"View '{view_filter}' not found.", "available_views": [{"index": i, "title": v.get("title", "")} for i, v in enumerate(views)]})
+            # Return full config as YAML with view summary
+            view_summary = [{"index": i, "title": v.get("title", ""), "sections": len(v.get("sections", [])), "cards": len(v.get("cards", []))} for i, v in enumerate(views)]
+            header = f"# Dashboard: {did} (source: {source})\n# Views: {len(views)}\n# View summary: {json.dumps(view_summary)}\n\n"
+            return header + yaml.dump(config, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
         elif name == "ha_update_dashboard":
             did = inp.get("dashboard_id", "lovelace")
             config = inp["config"]
-            # Primary: Write directly to .storage file
             storage_dir = Path(HA_CONFIG_DIR) / ".storage"
             fname = "lovelace" if did == "lovelace" else f"lovelace.{did}"
             sf = storage_dir / fname
-            if sf.exists():
-                try:
-                    original_text = sf.read_text()
-                    sdata = json.loads(original_text)
-                    old_config = sdata.get("data", {}).get("config", {})
-                    old_views = len(old_config.get("views", []))
-                    new_views = len(config.get("views", []))
-                    # Safety check: refuse if new config has significantly fewer views
-                    if old_views > 0 and new_views < old_views:
-                        return json.dumps({
-                            "error": f"SAFETY BLOCK: New config has {new_views} views but original has {old_views}. "
-                            f"This would delete {old_views - new_views} view(s). "
-                            f"To modify a dashboard, you MUST include ALL existing views in the config, not just the ones you're changing. "
-                            f"Read the full dashboard config first with ha_get_dashboard_config, then add/modify views while keeping all others intact.",
-                            "original_views": old_views,
-                            "new_views": new_views,
-                        })
-                    # Safety check: refuse if new config is much smaller (likely truncated data)
-                    new_text = json.dumps(config)
-                    old_text = json.dumps(old_config)
-                    if len(old_text) > 1000 and len(new_text) < len(old_text) * 0.5:
-                        return json.dumps({
-                            "error": f"SAFETY BLOCK: New config is {len(new_text)} chars but original is {len(old_text)} chars ({len(new_text)/len(old_text)*100:.0f}%). "
-                            f"This looks like data loss from a truncated read. Read the FULL config first, then make targeted changes.",
-                        })
-                    # Create backup before writing
-                    backup_path = sf.with_name(f"{sf.name}.backup")
-                    shutil.copy2(sf, backup_path)
-                    sdata["data"]["config"] = config
-                    sf.write_text(json.dumps(sdata, indent=2))
-                    # Reload lovelace to pick up changes
-                    try:
-                        await ha_post("/api/services/lovelace/reload_resources")
-                    except Exception:
-                        pass
-                    return json.dumps({
-                        "success": True, "method": ".storage", "file": fname,
-                        "backup": str(backup_path.relative_to(Path(HA_CONFIG_DIR))),
-                        "views_before": old_views, "views_after": new_views,
-                        "note": "Backup saved. Refresh the dashboard in your browser to see changes."
-                    })
-                except json.JSONDecodeError as e:
-                    return json.dumps({"error": f"Invalid JSON in config: {e}"})
-                except Exception as e:
-                    print(f"[WARN] .storage write failed: {e}")
-                    return json.dumps({"error": f"Write failed: {str(e)}"})
-            # Fallback: Try the API
+            if not sf.exists():
+                return json.dumps({"error": f"Dashboard file not found: .storage/{fname}"})
             try:
-                endpoint = "/api/lovelace/config" if did == "lovelace" else f"/api/lovelace/config/{did}"
-                result = await ha_post(endpoint, config)
-                return json.dumps(result) if isinstance(result, (dict, list)) else str(result)
+                # Read original
+                original_text = sf.read_text()
+                sdata = json.loads(original_text)
+                old_config = sdata.get("data", {}).get("config", {})
+                old_views = old_config.get("views", [])
+                new_views = config.get("views", [])
+                # Safety: must have views key
+                if "views" not in config:
+                    return json.dumps({"error": "BLOCKED: Config is missing 'views' key. This would wipe the dashboard."})
+                # Safety: cannot have fewer views
+                if len(old_views) > 0 and len(new_views) < len(old_views):
+                    return json.dumps({
+                        "error": f"BLOCKED: New config has {len(new_views)} views but original has {len(old_views)}. "
+                        f"You MUST include ALL {len(old_views)} existing views. Read the full config first, modify only what's needed, keep everything else.",
+                    })
+                # Safety: cannot be much smaller (truncated data)
+                old_size = len(json.dumps(old_config))
+                new_size = len(json.dumps(config))
+                if old_size > 1000 and new_size < old_size * 0.5:
+                    return json.dumps({
+                        "error": f"BLOCKED: New config is {new_size} chars but original is {old_size} chars ({new_size*100//old_size}%). "
+                        f"This looks like truncated data. Read the FULL config with ha_get_dashboard_config first.",
+                    })
+                # Backup original
+                backup_path = sf.with_name(f"{sf.name}.backup")
+                shutil.copy2(sf, backup_path)
+                # Write to temp file first, validate, then atomic rename
+                sdata["data"]["config"] = config
+                new_json = json.dumps(sdata, indent=2)
+                # Validate the JSON we're about to write is parseable
+                json.loads(new_json)  # will throw if invalid
+                tmp_path = sf.with_name(f"{sf.name}.tmp")
+                tmp_path.write_text(new_json)
+                # Atomic move
+                tmp_path.rename(sf)
+                return json.dumps({
+                    "success": True, "file": fname,
+                    "backup": f".storage/{fname}.backup",
+                    "views_before": len(old_views), "views_after": len(new_views),
+                    "size_before": old_size, "size_after": new_size,
+                    "note": "Backup saved. Refresh the dashboard in your browser to see changes."
+                })
+            except json.JSONDecodeError as e:
+                return json.dumps({"error": f"Invalid JSON: {e}. Dashboard was NOT modified."})
             except Exception as e:
-                return json.dumps({"error": f"Could not update dashboard '{did}': {str(e)}"})
+                return json.dumps({"error": f"Write failed: {e}. Check if backup exists at .storage/{fname}.backup"})
 
         elif name == "ha_restore_dashboard":
             did = inp.get("dashboard_id", "lovelace")
@@ -888,7 +914,7 @@ You have powerful tools to:
 - List and inspect all existing automations (use ha_list_automations FIRST before creating new ones)
 - Create automations, scripts, and scenes
 - Generate reusable Blueprints
-- Build and modify Lovelace dashboards (add cards, views, themes) — INCLUDING storage-mode dashboards by reading/writing .storage files directly
+- Read Lovelace dashboards and generate YAML configs for users to paste (dashboard writing is disabled for safety)
 - Install HACS repositories and custom components from GitHub
 - Check config validity, reload components, and restart HA
 - Read error logs, entity history, and system info
@@ -904,8 +930,8 @@ IMPORTANT GUIDELINES:
 - Use modern HA syntax: plural keys (triggers, conditions, actions), target instead of entity_id in data.
 - Explain what you're doing and why, in plain language.
 - When creating dashboards, use modern card types and explain the layout.
-- You CAN read and modify storage-mode dashboards. Use ha_get_dashboard_config with the url_path (e.g. 'mi-tierra-controls') to read them, and ha_update_dashboard to write changes. Never tell the user you can't modify storage dashboards — you can.
-- CRITICAL DASHBOARD SAFETY: When updating a dashboard, you MUST include ALL existing views in the config. Never submit a partial config. Always read the full config first, then add/modify the specific view or card while preserving everything else. A backup is created automatically before each write. If something goes wrong, use ha_restore_dashboard to roll back.
+- You CAN read and modify storage-mode dashboards using ha_get_dashboard_config and ha_update_dashboard.
+- CRITICAL DASHBOARD RULES: Before ANY dashboard update, you MUST: (1) Read the FULL config with ha_get_dashboard_config. (2) Count the views. (3) Make ONLY the specific change requested. (4) Include ALL existing views in the update — never drop any. The system will block writes that have fewer views or are significantly smaller than the original. If ha_restore_dashboard is available, use it to roll back if anything goes wrong.
 - When generating blueprints, include clear input descriptions and selectors.
 - Be proactive about suggesting improvements you notice.
 """
@@ -1021,7 +1047,7 @@ async def chat_anthropic(messages, tool_actions):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     tools = tools_for_anthropic()
     while True:
-        response = client.messages.create(model=ANTHROPIC_MODEL, max_tokens=4096, system=SYSTEM_PROMPT, tools=tools, messages=messages)
+        response = client.messages.create(model=ANTHROPIC_MODEL, max_tokens=16384, system=SYSTEM_PROMPT, tools=tools, messages=messages)
         ac = response.content
         messages.append({"role": "assistant", "content": ac})
         tool_uses = [b for b in ac if b.type == "tool_use"]

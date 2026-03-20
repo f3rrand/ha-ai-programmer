@@ -1,21 +1,9 @@
 ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
-# Install Python 3 and build dependencies
-RUN apk add --no-cache \
-        python3 \
-        py3-pip \
-        py3-yaml \
-        curl \
-        jq \
-        gcc \
-        musl-dev \
-        python3-dev \
-        libffi-dev \
-        openssl-dev
+RUN apk add --no-cache curl jq bash gcc musl-dev libffi-dev openssl-dev
 
-# Install Python packages
-RUN pip3 install --no-cache-dir --break-system-packages \
+RUN pip install --no-cache-dir \
         fastapi \
         "uvicorn[standard]" \
         httpx \
@@ -26,16 +14,13 @@ RUN pip3 install --no-cache-dir --break-system-packages \
         pyyaml \
         aiofiles
 
-# Cleanup build deps to save space
-RUN apk del gcc musl-dev python3-dev libffi-dev openssl-dev
+RUN apk del gcc musl-dev libffi-dev openssl-dev
 
-# Copy application
 COPY app/ /app/
-
-WORKDIR /app
-
-# Copy startup script
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 
-CMD [ "/run.sh" ]
+WORKDIR /app
+
+ENTRYPOINT []
+CMD ["/run.sh"]

@@ -766,6 +766,26 @@ IMPORTANT GUIDELINES:
 
 conversations = {}  # type: dict[str, list]
 
+# ── Chat history persistence (survives tab reloads) ──────────────────────
+CHAT_HISTORY_FILE = Path("/data/chat_history.json")
+chat_display_history = {}  # type: dict[str, list]  # session_id -> [{role, content, tool_actions}]
+
+def _load_chat_history():
+    global chat_display_history
+    try:
+        if CHAT_HISTORY_FILE.exists():
+            chat_display_history = json.loads(CHAT_HISTORY_FILE.read_text())
+    except Exception:
+        chat_display_history = {}
+
+def _save_chat_history():
+    try:
+        CHAT_HISTORY_FILE.write_text(json.dumps(chat_display_history))
+    except Exception:
+        pass
+
+_load_chat_history()
+
 async def chat_openai(messages, tool_actions):
     from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
@@ -923,11 +943,32 @@ async def chat(request: Request):
         final_text = await fn(messages, tool_actions)
         if len(conversations[session_id]) > 40:
             conversations[session_id] = conversations[session_id][-40:]
+        # Save to display history
+        if session_id not in chat_display_history:
+            chat_display_history[session_id] = []
+        chat_display_history[session_id].append({"role": "user", "content": user_message})
+        chat_display_history[session_id].append({"role": "assistant", "content": final_text, "tool_actions": tool_actions})
+        if len(chat_display_history[session_id]) > 100:
+            chat_display_history[session_id] = chat_display_history[session_id][-100:]
+        _save_chat_history()
         return JSONResponse({"response": final_text, "tool_actions": tool_actions, "session_id": session_id})
     except Exception as e:
         traceback.print_exc()
         return JSONResponse({"error": f"{AI_PROVIDER.title()} error: {str(e)}"}, status_code=502)
 
+
+@app.get("/api/chat-history")
+async def get_chat_history(request: Request):
+    session_id = request.query_params.get("session_id", "default")
+    return JSONResponse({"messages": chat_display_history.get(session_id, []), "session_id": session_id})
+
+@app.delete("/api/chat-history")
+async def clear_chat_history(request: Request):
+    session_id = request.query_params.get("session_id", "default")
+    chat_display_history.pop(session_id, None)
+    conversations.pop(session_id, None)
+    _save_chat_history()
+    return JSONResponse({"ok": True})
 
 @app.get("/api/ha-status")
 async def ha_status():

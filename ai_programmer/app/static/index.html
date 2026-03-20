@@ -250,6 +250,9 @@
     <span>HA AI Programmer</span>
   </div>
   <div class="header-right">
+    <div id="new-chat-btn" onclick="newChat()" style="padding:6px 12px;background:var(--surface2);border-radius:8px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:4px;" title="New Chat">
+      <span>&#x2795;</span> New Chat
+    </div>
     <div id="ai-badge" onclick="openSettings()">
       <span>&#x2699;&#xfe0f;</span>
       <span id="ai-badge-text">Loading...</span>
@@ -383,7 +386,7 @@ const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('msg-input');
 const sendBtn = document.getElementById('send-btn');
 const welcomeEl = document.getElementById('welcome');
-const sessionId = crypto.randomUUID();
+const sessionId = 'default';
 let sending = false;
 let currentProvider = 'openai';
 
@@ -528,7 +531,30 @@ async function loadEntities() {
 }
 function askAbout(domain) { inputEl.value='Show me all '+domain+' entities and their current state'; sendMessage(); }
 
-loadProviderInfo(); checkStatus(); loadEntities(); inputEl.focus();
+async function loadChatHistory() {
+  try {
+    const res = await fetch('api/chat-history?session_id=' + sessionId);
+    const data = await res.json();
+    if (data.messages && data.messages.length > 0) {
+      for (const msg of data.messages) {
+        addMessage(msg.role, msg.content, msg.tool_actions);
+      }
+    }
+  } catch {}
+}
+
+async function newChat() {
+  try {
+    await fetch('api/chat-history?session_id=' + sessionId, {method: 'DELETE'});
+  } catch {}
+  document.getElementById('messages').innerHTML = '';
+  const w = document.createElement('div');
+  w.className = 'welcome'; w.id = 'welcome';
+  w.innerHTML = '<h2>&#x1f3e0; HA AI Programmer</h2><p>Full-power HA programmer. Create automations, build dashboards, install HACS repos, edit YAML configs, generate blueprints — all through chat.</p>';
+  document.getElementById('messages').appendChild(w);
+}
+
+loadProviderInfo(); checkStatus(); loadEntities(); loadChatHistory(); inputEl.focus();
 </script>
 </body>
 </html>

@@ -1090,6 +1090,54 @@ async def ha_entities_summary():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/api/debug")
+async def debug_info():
+    """Debug endpoint to diagnose file access and API issues."""
+    info = {
+        "ha_url": HA_URL,
+        "ha_token_set": bool(HA_TOKEN),
+        "ha_token_length": len(HA_TOKEN) if HA_TOKEN else 0,
+        "config_dir": HA_CONFIG_DIR,
+        "config_dir_exists": Path(HA_CONFIG_DIR).exists(),
+    }
+    # Check what's in /config
+    config_path = Path(HA_CONFIG_DIR)
+    if config_path.exists():
+        try:
+            info["config_files"] = sorted([f.name for f in config_path.iterdir()])[:50]
+        except Exception as e:
+            info["config_files_error"] = str(e)
+    # Check .storage directory
+    storage_path = config_path / ".storage"
+    if storage_path.exists():
+        try:
+            storage_files = sorted([f.name for f in storage_path.iterdir() if "lovelace" in f.name.lower()])
+            info["storage_lovelace_files"] = storage_files
+        except Exception as e:
+            info["storage_error"] = str(e)
+    else:
+        info["storage_exists"] = False
+    # Test HA API
+    try:
+        result = await ha_get("/api/")
+        info["ha_api_test"] = result
+    except Exception as e:
+        info["ha_api_error"] = str(e)
+    # Test lovelace dashboards API
+    try:
+        result = await ha_get("/api/lovelace/dashboards")
+        info["lovelace_dashboards_api"] = result
+    except Exception as e:
+        info["lovelace_dashboards_error"] = str(e)
+    # Test default lovelace config API
+    try:
+        result = await ha_get("/api/lovelace/config")
+        info["lovelace_config_keys"] = list(result.keys()) if isinstance(result, dict) else type(result).__name__
+    except Exception as e:
+        info["lovelace_config_error"] = str(e)
+    return JSONResponse(info)
+
+
 @app.get("/")
 async def index():
     return HTMLResponse((Path(__file__).parent / "static" / "index.html").read_text())

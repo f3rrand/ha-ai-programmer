@@ -910,7 +910,7 @@ async def get_provider():
 @app.post("/api/settings")
 async def update_settings(request: Request):
     global AI_PROVIDER, OPENAI_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY
-    global OPENAI_MODEL, GEMINI_MODEL, ANTHROPIC_MODEL, HA_URL, HA_TOKEN
+    global OPENAI_MODEL, GEMINI_MODEL, ANTHROPIC_MODEL
     global OLLAMA_URL, OLLAMA_MODEL
     body = await request.json()
     if "provider" in body: AI_PROVIDER = body["provider"].lower()
@@ -922,8 +922,6 @@ async def update_settings(request: Request):
     if body.get("anthropic_model"): ANTHROPIC_MODEL = body["anthropic_model"]
     if body.get("ollama_url"): OLLAMA_URL = body["ollama_url"]
     if body.get("ollama_model"): OLLAMA_MODEL = body["ollama_model"]
-    if "ha_url" in body: HA_URL = body["ha_url"].rstrip("/")
-    if body.get("ha_token"): HA_TOKEN = body["ha_token"]
     conversations.clear()
     models = {"openai": OPENAI_MODEL, "gemini": GEMINI_MODEL, "anthropic": ANTHROPIC_MODEL, "ollama": OLLAMA_MODEL}
     return JSONResponse({"ok": True, "provider": AI_PROVIDER, "model": models.get(AI_PROVIDER)})

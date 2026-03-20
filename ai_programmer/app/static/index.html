@@ -321,17 +321,10 @@
       <div class="hint">Good options: llama3.1, mistral, qwen2.5 (supports tool calling)</div>
     </div>
 
-    <div class="modal-section" id="ha-connection-section">
+    <div class="modal-section">
       <h4>Home Assistant</h4>
-      <div id="ha-addon-notice" style="display:none;padding:8px 12px;background:var(--bg);border-radius:8px;color:var(--text-muted);font-size:13px;">
-        &#x2705; Running as HA add-on &mdash; connection is automatic, no configuration needed.
-      </div>
-      <div id="ha-manual-fields">
-        <label>HA URL</label>
-        <input type="text" id="ha-url" placeholder="http://homeassistant.local:8123">
-        <label>Long-Lived Access Token</label>
-        <input type="password" id="ha-token" placeholder="Your HA access token">
-        <div class="hint">Create at HA &#x2192; Profile &#x2192; Security &#x2192; Long-Lived Access Tokens</div>
+      <div style="padding:8px 12px;background:var(--bg);border-radius:8px;color:var(--text-muted);font-size:13px;">
+        &#x2705; Connected automatically via HA add-on &mdash; no configuration needed.
       </div>
     </div>
 
@@ -419,11 +412,9 @@ async function saveSettings() {
     anthropic_model: document.getElementById('anthropic-model').value,
     ollama_url: document.getElementById('ollama-url').value,
     ollama_model: document.getElementById('ollama-model').value,
-    ha_url: document.getElementById('ha-url').value,
-    ha_token: document.getElementById('ha-token').value,
   };
   try {
-    const res = await fetch('/api/settings', {
+    const res = await fetch('api/settings', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(body),
@@ -486,7 +477,7 @@ async function sendMessage() {
   inputEl.value = ''; inputEl.style.height = 'auto';
   addMessage('user', text); addTyping();
   try {
-    const res = await fetch('/api/chat', {
+    const res = await fetch('api/chat', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ message: text, session_id: sessionId }),
     });
@@ -500,19 +491,12 @@ function sendSuggestion(el) { inputEl.value = el.textContent.trim(); sendMessage
 
 async function loadProviderInfo() {
   try {
-    const res = await fetch('/api/provider');
+    const res = await fetch('api/provider');
     const data = await res.json();
     const names = {openai:'OpenAI', gemini:'Gemini', anthropic:'Anthropic', ollama:'Ollama'};
     document.getElementById('ai-badge-text').textContent = (names[data.provider]||data.provider)+' \u00b7 '+data.model;
     currentProvider = data.provider;
     selectProvider(data.provider);
-    if (data.ha_url) {
-      document.getElementById('ha-url').value = data.ha_url;
-      if (data.ha_url.includes('supervisor')) {
-        document.getElementById('ha-addon-notice').style.display = 'block';
-        document.getElementById('ha-manual-fields').style.display = 'none';
-      }
-    }
     if (!data.has_key) document.getElementById('setup-banner').classList.add('show');
   } catch { document.getElementById('ai-badge-text').textContent = 'Not connected'; }
 }
@@ -520,7 +504,7 @@ async function loadProviderInfo() {
 async function checkStatus() {
   const el = document.getElementById('ha-status');
   try {
-    const res = await fetch('/api/ha-status');
+    const res = await fetch('api/ha-status');
     const data = await res.json();
     el.className = data.connected ? 'connected' : 'disconnected';
     el.querySelector('.status-text').textContent = data.connected ? 'HA Connected' : 'HA Disconnected';
@@ -530,7 +514,7 @@ async function checkStatus() {
 async function loadEntities() {
   const el = document.getElementById('sidebar-entities');
   try {
-    const res = await fetch('/api/ha-entities-summary');
+    const res = await fetch('api/ha-entities-summary');
     const data = await res.json();
     if (data.error) { el.innerHTML='<div style="padding:16px;color:var(--text-muted);font-size:13px">Connect HA to see entities</div>'; return; }
     const icons = {light:'&#x1f4a1;',switch:'&#x1f50c;',sensor:'&#x1f4ca;',binary_sensor:'&#x1f518;',climate:'&#x1f321;&#xfe0f;',cover:'&#x1f6aa;',media_player:'&#x1f3b5;',fan:'&#x1f32c;&#xfe0f;',lock:'&#x1f512;',vacuum:'&#x1f9f9;',automation:'&#x2699;&#xfe0f;',script:'&#x1f4dc;',scene:'&#x1f3ac;',camera:'&#x1f4f7;',person:'&#x1f464;',weather:'&#x26c5;'};

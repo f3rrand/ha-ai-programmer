@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HA AI Programmer</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #242836;
+    --border: #2e3347;
+    --text: #e4e6ef;
+    --text-muted: #8b8fa3;
+    --accent: #4da6ff;
+    --accent-dim: #1a3a5c;
+    --green: #4ade80;
+    --red: #f87171;
+    --orange: #fb923c;
+    --yellow: #facc15;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Header ─────────────────────────────────────────────── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px; background: var(--surface);
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  header .logo { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 600; }
+  header .logo .icon { font-size: 24px; }
+  .header-right { display: flex; align-items: center; gap: 16px; }
+  #ai-badge {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 20px; padding: 4px 12px;
+    font-size: 12px; color: var(--accent); cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  #ai-badge:hover { border-color: var(--accent); }
+  #ha-status {
+    display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted);
+  }
+  #ha-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+  #ha-status.connected .dot { background: var(--green); }
+  #ha-status.disconnected .dot { background: var(--red); }
+
+  /* ── Settings modal ─────────────────────────────────────── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6); z-index: 100;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 28px; width: 480px;
+    max-height: 90vh; overflow-y: auto;
+  }
+  .modal h3 { font-size: 18px; margin-bottom: 20px; }
+  .modal label {
+    display: block; font-size: 13px; font-weight: 500;
+    color: var(--text-muted); margin-bottom: 6px; margin-top: 16px;
+  }
+  .modal label:first-of-type { margin-top: 0; }
+  .modal input, .modal select {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; color: var(--text);
+    font-size: 14px; font-family: inherit; outline: none;
+    transition: border-color 0.15s;
+  }
+  .modal input:focus, .modal select:focus { border-color: var(--accent); }
+  .modal input::placeholder { color: var(--text-muted); }
+  .provider-cards {
+    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-top: 4px;
+  }
+  .provider-card {
+    background: var(--surface2); border: 2px solid var(--border);
+    border-radius: 10px; padding: 12px 10px; text-align: center;
+    cursor: pointer; transition: border-color 0.15s, background 0.15s; font-size: 13px;
+  }
+  .provider-card:hover { border-color: var(--text-muted); }
+  .provider-card.selected { border-color: var(--accent); background: var(--accent-dim); }
+  .provider-card .provider-name { font-weight: 600; margin-top: 4px; }
+  .provider-card .provider-icon { font-size: 22px; }
+  .modal-section {
+    margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);
+  }
+  .modal-section h4 {
+    font-size: 14px; font-weight: 600; color: var(--text-muted);
+    margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .modal-actions { display: flex; gap: 10px; margin-top: 24px; justify-content: flex-end; }
+  .btn {
+    padding: 10px 20px; border-radius: 8px; font-size: 14px;
+    font-weight: 500; cursor: pointer; border: none; transition: opacity 0.15s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { background: var(--border); }
+  .hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .hint a { color: var(--accent); }
+
+  /* ── Main layout ────────────────────────────────────────── */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Sidebar ────────────────────────────────────────────── */
+  .sidebar {
+    width: 280px; background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden;
+  }
+  .sidebar-header {
+    padding: 16px; font-size: 14px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border);
+  }
+  .sidebar-content { flex: 1; overflow-y: auto; padding: 8px; }
+  .entity-group-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; font-size: 13px; font-weight: 500; color: var(--text-muted);
+    cursor: pointer; border-radius: 8px; transition: background 0.15s;
+  }
+  .entity-group-header:hover { background: var(--surface2); }
+  .entity-group-header .count {
+    background: var(--surface2); padding: 2px 8px; border-radius: 10px; font-size: 11px;
+  }
+
+  /* ── Chat area ──────────────────────────────────────────── */
+  .chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .messages {
+    flex: 1; overflow-y: auto; padding: 24px; display: flex;
+    flex-direction: column; gap: 16px;
+  }
+  .message { display: flex; gap: 12px; max-width: 800px; animation: fadeIn 0.2s ease; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .message.user { align-self: flex-end; flex-direction: row-reverse; }
+  .message .avatar {
+    width: 32px; height: 32px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0; background: var(--surface2);
+  }
+  .message.user .avatar { background: var(--accent-dim); }
+  .message.assistant .avatar { background: #1a2e1a; }
+  .message .bubble {
+    padding: 12px 16px; border-radius: var(--radius);
+    font-size: 14px; line-height: 1.6; max-width: 100%;
+  }
+  .message.user .bubble { background: var(--accent-dim); border: 1px solid #264a73; }
+  .message.assistant .bubble { background: var(--surface2); border: 1px solid var(--border); }
+  .message .bubble pre {
+    background: var(--bg); padding: 12px; border-radius: 8px;
+    overflow-x: auto; margin: 8px 0; font-size: 13px; line-height: 1.5;
+    font-family: 'SF Mono','Fira Code','Consolas',monospace;
+  }
+  .message .bubble code {
+    font-family: 'SF Mono','Fira Code','Consolas',monospace;
+    font-size: 13px; background: var(--bg); padding: 2px 5px; border-radius: 4px;
+  }
+  .message .bubble pre code { background: none; padding: 0; }
+  .tool-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .tool-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 20px; font-size: 11px; color: var(--text-muted);
+    cursor: pointer; transition: background 0.15s;
+  }
+  .tool-badge:hover { background: var(--surface); }
+
+  /* ── Welcome ────────────────────────────────────────────── */
+  .welcome {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; flex: 1; padding: 40px; text-align: center;
+  }
+  .welcome h2 { font-size: 28px; margin-bottom: 8px; font-weight: 600; }
+  .welcome p { color: var(--text-muted); font-size: 15px; margin-bottom: 32px; max-width: 500px; }
+  .suggestions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 520px; width: 100%; }
+  .suggestion {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; font-size: 13px; text-align: left; color: var(--text);
+    cursor: pointer; transition: border-color 0.15s, background 0.15s;
+  }
+  .suggestion:hover { border-color: var(--accent); background: var(--surface2); }
+  .suggestion .suggestion-icon { font-size: 18px; margin-bottom: 6px; display: block; }
+
+  /* ── Setup banner ───────────────────────────────────────── */
+  .setup-banner {
+    display: none; padding: 12px 24px; background: #1a1a2e;
+    border-bottom: 1px solid #2a2a4a; font-size: 13px;
+    color: var(--yellow); text-align: center; cursor: pointer;
+  }
+  .setup-banner.show { display: block; }
+
+  /* ── Input area ─────────────────────────────────────────── */
+  .input-area {
+    padding: 16px 24px 20px; border-top: 1px solid var(--border);
+    background: var(--surface); flex-shrink: 0;
+  }
+  .input-row { display: flex; gap: 10px; max-width: 800px; margin: 0 auto; }
+  #msg-input {
+    flex: 1; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 16px; color: var(--text);
+    font-size: 14px; font-family: inherit; resize: none; outline: none;
+    min-height: 44px; max-height: 120px; transition: border-color 0.15s;
+  }
+  #msg-input:focus { border-color: var(--accent); }
+  #msg-input::placeholder { color: var(--text-muted); }
+  #send-btn {
+    background: var(--accent); border: none; border-radius: var(--radius);
+    padding: 0 20px; color: #fff; font-size: 14px; font-weight: 500;
+    cursor: pointer; transition: opacity 0.15s; white-space: nowrap;
+  }
+  #send-btn:hover { opacity: 0.9; }
+  #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .typing { display: flex; gap: 4px; padding: 4px 0; }
+  .typing span {
+    width: 7px; height: 7px; background: var(--text-muted);
+    border-radius: 50%; animation: bounce 1.4s ease-in-out infinite;
+  }
+  .typing span:nth-child(2) { animation-delay: 0.2s; }
+  .typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce { 0%,80%,100% { transform:scale(0.6);opacity:0.4; } 40% { transform:scale(1);opacity:1; } }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  @media (max-width: 768px) {
+    .sidebar { display: none; }
+    .suggestions { grid-template-columns: 1fr; }
+    .modal { width: 95%; margin: 0 10px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span class="icon">&#x1f3e0;</span>
+    <span>HA AI Programmer</span>
+  </div>
+  <div class="header-right">
+    <div id="ai-badge" onclick="openSettings()">
+      <span>&#x2699;&#xfe0f;</span>
+      <span id="ai-badge-text">Loading...</span>
+    </div>
+    <div id="ha-status">
+      <span class="dot"></span>
+      <span class="status-text">Checking...</span>
+    </div>
+  </div>
+</header>
+
+<div class="setup-banner" id="setup-banner" onclick="openSettings()">
+  &#x26a0;&#xfe0f; Click here to configure your AI provider and API key to get started
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settings-modal">
+  <div class="modal">
+    <h3>&#x2699;&#xfe0f; Settings</h3>
+
+    <label>AI Provider</label>
+    <div class="provider-cards">
+      <div class="provider-card" data-provider="openai" onclick="selectProvider('openai')">
+        <div class="provider-icon">&#x1f7e2;</div>
+        <div class="provider-name">OpenAI</div>
+      </div>
+      <div class="provider-card" data-provider="gemini" onclick="selectProvider('gemini')">
+        <div class="provider-icon">&#x1f535;</div>
+        <div class="provider-name">Gemini</div>
+      </div>
+      <div class="provider-card" data-provider="anthropic" onclick="selectProvider('anthropic')">
+        <div class="provider-icon">&#x1f7e0;</div>
+        <div class="provider-name">Anthropic</div>
+      </div>
+      <div class="provider-card" data-provider="ollama" onclick="selectProvider('ollama')">
+        <div class="provider-icon">&#x1f4bb;</div>
+        <div class="provider-name">Ollama</div>
+      </div>
+    </div>
+
+    <div id="fields-openai" class="provider-fields">
+      <label>OpenAI API Key</label>
+      <input type="password" id="openai-key" placeholder="sk-...">
+      <div class="hint">Get yours at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a></div>
+      <label>Model</label>
+      <input type="text" id="openai-model" placeholder="gpt-4o" value="gpt-4o">
+    </div>
+    <div id="fields-gemini" class="provider-fields" style="display:none">
+      <label>Gemini API Key</label>
+      <input type="password" id="gemini-key" placeholder="AIza...">
+      <div class="hint">Get yours at <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com</a></div>
+      <label>Model</label>
+      <input type="text" id="gemini-model" placeholder="gemini-2.5-flash" value="gemini-2.5-flash">
+    </div>
+    <div id="fields-anthropic" class="provider-fields" style="display:none">
+      <label>Anthropic API Key</label>
+      <input type="password" id="anthropic-key" placeholder="sk-ant-...">
+      <div class="hint">Get yours at <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a></div>
+      <label>Model</label>
+      <input type="text" id="anthropic-model" placeholder="claude-sonnet-4-20250514" value="claude-sonnet-4-20250514">
+    </div>
+
+    <div id="fields-ollama" class="provider-fields" style="display:none">
+      <label>Ollama URL</label>
+      <input type="text" id="ollama-url" placeholder="http://localhost:11434" value="http://localhost:11434">
+      <div class="hint">Free &amp; local. Install from <a href="https://ollama.com" target="_blank">ollama.com</a>, then run: <code style="background:var(--bg);padding:2px 6px;border-radius:4px;font-size:12px">ollama pull llama3.1</code></div>
+      <label>Model</label>
+      <input type="text" id="ollama-model" placeholder="llama3.1" value="llama3.1">
+      <div class="hint">Good options: llama3.1, mistral, qwen2.5 (supports tool calling)</div>
+    </div>
+
+    <div class="modal-section">
+      <h4>Home Assistant</h4>
+      <label>HA URL</label>
+      <input type="text" id="ha-url" placeholder="http://homeassistant.local:8123">
+      <label>Long-Lived Access Token</label>
+      <input type="password" id="ha-token" placeholder="Your HA access token">
+      <div class="hint">Create at HA &#x2192; Profile &#x2192; Security &#x2192; Long-Lived Access Tokens</div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeSettings()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-header">Entities</div>
+    <div class="sidebar-content" id="sidebar-entities">
+      <div style="padding:16px;color:var(--text-muted);font-size:13px;">Loading...</div>
+    </div>
+  </div>
+
+  <div class="chat-area">
+    <div class="messages" id="messages">
+      <div class="welcome" id="welcome">
+        <h2>&#x1f3e0; HA AI Programmer</h2>
+        <p>Full-power HA programmer. Create automations, build dashboards, install HACS repos, edit YAML configs, generate blueprints — all through chat.</p>
+        <div class="suggestions">
+          <div class="suggestion" onclick="sendSuggestion(this)">
+            <span class="suggestion-icon">&#x2699;&#xfe0f;</span>
+            Create a blueprint for motion-activated lights with configurable timeout and brightness
+          </div>
+          <div class="suggestion" onclick="sendSuggestion(this)">
+            <span class="suggestion-icon">&#x1f4cb;</span>
+            Build me a dashboard with weather, lights, climate, and energy cards
+          </div>
+          <div class="suggestion" onclick="sendSuggestion(this)">
+            <span class="suggestion-icon">&#x1f4e6;</span>
+            Search HACS for mushroom cards and install them
+          </div>
+          <div class="suggestion" onclick="sendSuggestion(this)">
+            <span class="suggestion-icon">&#x1f4c4;</span>
+            Show me my automations.yaml and suggest improvements
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="input-area">
+      <div class="input-row">
+        <textarea id="msg-input" rows="1" placeholder="Tell me what to do with your Home Assistant..." onkeydown="handleKey(event)"></textarea>
+        <button id="send-btn" onclick="sendMessage()">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const messagesEl = document.getElementById('messages');
+const inputEl = document.getElementById('msg-input');
+const sendBtn = document.getElementById('send-btn');
+const welcomeEl = document.getElementById('welcome');
+const sessionId = crypto.randomUUID();
+let sending = false;
+let currentProvider = 'openai';
+
+function openSettings() { document.getElementById('settings-modal').classList.add('open'); }
+function closeSettings() { document.getElementById('settings-modal').classList.remove('open'); }
+document.getElementById('settings-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeSettings();
+});
+
+function selectProvider(p) {
+  currentProvider = p;
+  document.querySelectorAll('.provider-card').forEach(c => c.classList.remove('selected'));
+  document.querySelector('.provider-card[data-provider="'+p+'"]').classList.add('selected');
+  document.querySelectorAll('.provider-fields').forEach(f => f.style.display = 'none');
+  document.getElementById('fields-' + p).style.display = 'block';
+}
+
+async function saveSettings() {
+  const body = {
+    provider: currentProvider,
+    openai_api_key: document.getElementById('openai-key').value,
+    openai_model: document.getElementById('openai-model').value,
+    gemini_api_key: document.getElementById('gemini-key').value,
+    gemini_model: document.getElementById('gemini-model').value,
+    anthropic_api_key: document.getElementById('anthropic-key').value,
+    anthropic_model: document.getElementById('anthropic-model').value,
+    ollama_url: document.getElementById('ollama-url').value,
+    ollama_model: document.getElementById('ollama-model').value,
+    ha_url: document.getElementById('ha-url').value,
+    ha_token: document.getElementById('ha-token').value,
+  };
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      closeSettings();
+      loadProviderInfo();
+      checkStatus();
+      loadEntities();
+      document.getElementById('setup-banner').classList.remove('show');
+    }
+  } catch (err) { alert('Failed to save: ' + err.message); }
+}
+
+inputEl.addEventListener('input', () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+});
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+function renderText(text) {
+  text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, l, c) => '<pre><code>'+escapeHtml(c.trim())+'</code></pre>');
+  text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/\n/g, '<br>');
+  return text;
+}
+function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function addMessage(role, text, toolActions) {
+  if (welcomeEl && welcomeEl.parentNode) welcomeEl.remove();
+  const div = document.createElement('div');
+  div.className = 'message ' + role;
+  const avatar = role === 'user' ? '&#x1f464;' : '&#x1f916;';
+  let toolHtml = '';
+  if (toolActions && toolActions.length) {
+    toolHtml = '<div class="tool-actions">' + toolActions.map(a =>
+      '<span class="tool-badge" title="'+escapeHtml(JSON.stringify(a.input))+'">'+
+      '<span style="font-size:12px">&#x26a1;</span>'+a.tool.replace('ha_','')+'</span>'
+    ).join('') + '</div>';
+  }
+  div.innerHTML = '<div class="avatar">'+avatar+'</div><div><div class="bubble">'+renderText(text)+'</div>'+toolHtml+'</div>';
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+function addTyping() {
+  const d = document.createElement('div'); d.className='message assistant'; d.id='typing-indicator';
+  d.innerHTML='<div class="avatar">&#x1f916;</div><div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>';
+  messagesEl.appendChild(d); messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+function removeTyping() { const e=document.getElementById('typing-indicator'); if(e)e.remove(); }
+
+async function sendMessage() {
+  const text = inputEl.value.trim();
+  if (!text || sending) return;
+  sending = true; sendBtn.disabled = true;
+  inputEl.value = ''; inputEl.style.height = 'auto';
+  addMessage('user', text); addTyping();
+  try {
+    const res = await fetch('/api/chat', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ message: text, session_id: sessionId }),
+    });
+    const data = await res.json(); removeTyping();
+    if (data.error) addMessage('assistant', '**Error:** '+data.error);
+    else addMessage('assistant', data.response, data.tool_actions);
+  } catch(err) { removeTyping(); addMessage('assistant','**Connection error:** '+err.message); }
+  sending = false; sendBtn.disabled = false; inputEl.focus();
+}
+function sendSuggestion(el) { inputEl.value = el.textContent.trim(); sendMessage(); }
+
+async function loadProviderInfo() {
+  try {
+    const res = await fetch('/api/provider');
+    const data = await res.json();
+    const names = {openai:'OpenAI', gemini:'Gemini', anthropic:'Anthropic', ollama:'Ollama'};
+    document.getElementById('ai-badge-text').textContent = (names[data.provider]||data.provider)+' \u00b7 '+data.model;
+    currentProvider = data.provider;
+    selectProvider(data.provider);
+    if (data.ha_url) document.getElementById('ha-url').value = data.ha_url;
+    if (!data.has_key) document.getElementById('setup-banner').classList.add('show');
+  } catch { document.getElementById('ai-badge-text').textContent = 'Not connected'; }
+}
+
+async function checkStatus() {
+  const el = document.getElementById('ha-status');
+  try {
+    const res = await fetch('/api/ha-status');
+    const data = await res.json();
+    el.className = data.connected ? 'connected' : 'disconnected';
+    el.querySelector('.status-text').textContent = data.connected ? 'HA Connected' : 'HA Disconnected';
+  } catch { el.className='disconnected'; el.querySelector('.status-text').textContent='Server unreachable'; }
+}
+
+async function loadEntities() {
+  const el = document.getElementById('sidebar-entities');
+  try {
+    const res = await fetch('/api/ha-entities-summary');
+    const data = await res.json();
+    if (data.error) { el.innerHTML='<div style="padding:16px;color:var(--text-muted);font-size:13px">Connect HA to see entities</div>'; return; }
+    const icons = {light:'&#x1f4a1;',switch:'&#x1f50c;',sensor:'&#x1f4ca;',binary_sensor:'&#x1f518;',climate:'&#x1f321;&#xfe0f;',cover:'&#x1f6aa;',media_player:'&#x1f3b5;',fan:'&#x1f32c;&#xfe0f;',lock:'&#x1f512;',vacuum:'&#x1f9f9;',automation:'&#x2699;&#xfe0f;',script:'&#x1f4dc;',scene:'&#x1f3ac;',camera:'&#x1f4f7;',person:'&#x1f464;',weather:'&#x26c5;'};
+    let html='';
+    for (const [domain,count] of Object.entries(data.counts)) {
+      html+='<div class="entity-group"><div class="entity-group-header" onclick="askAbout(\''+domain+'\')"><span>'+(icons[domain]||'&#x2022;')+' '+domain+'</span><span class="count">'+count+'</span></div></div>';
+    }
+    html+='<div style="padding:12px 12px 4px;font-size:12px;color:var(--text-muted)">'+data.total+' total entities</div>';
+    el.innerHTML = html;
+  } catch { el.innerHTML='<div style="padding:16px;color:var(--text-muted);font-size:13px">Connect HA to see entities</div>'; }
+}
+function askAbout(domain) { inputEl.value='Show me all '+domain+' entities and their current state'; sendMessage(); }
+
+loadProviderInfo(); checkStatus(); loadEntities(); inputEl.focus();
+</script>
+</body>
+</html>

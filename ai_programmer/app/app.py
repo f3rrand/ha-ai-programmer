@@ -530,14 +530,37 @@ async def execute_tool(name: str, inp: dict) -> str:
 
         # ── Dashboards / Lovelace ─────────────────────────────────────────────
         elif name == "ha_get_dashboards":
-            result = await ha_get("/api/lovelace/dashboards")
-            return json.dumps(result, indent=2)
+            dashboards = []
+            try:
+                result = await ha_get("/api/lovelace/dashboards")
+                if isinstance(result, list):
+                    dashboards = result
+            except Exception:
+                pass
+            # Always include the default dashboard
+            dashboards.insert(0, {"id": None, "url_path": "lovelace", "title": "Overview (default)", "mode": "storage"})
+            # Also check for YAML dashboard files in config
+            dash_dir = Path(HA_CONFIG_DIR) / "dashboards"
+            if dash_dir.exists():
+                for f in dash_dir.glob("*.yaml"):
+                    dashboards.append({"id": f.stem, "url_path": f.stem, "title": f.stem, "mode": "yaml", "file": str(f.relative_to(HA_CONFIG_DIR))})
+            return json.dumps(dashboards, indent=2)
 
         elif name == "ha_get_dashboard_config":
             did = inp.get("dashboard_id", "lovelace")
-            endpoint = "/api/lovelace/config" if did == "lovelace" else f"/api/lovelace/config/{did}"
-            result = await ha_get(endpoint)
-            return json.dumps(result, indent=2)
+            try:
+                endpoint = "/api/lovelace/config" if did == "lovelace" else f"/api/lovelace/config/{did}"
+                result = await ha_get(endpoint)
+                return json.dumps(result, indent=2)
+            except Exception as e:
+                # Try reading from YAML file as fallback
+                yaml_path = Path(HA_CONFIG_DIR) / "dashboards" / f"{did}.yaml"
+                if yaml_path.exists():
+                    return yaml_path.read_text()
+                lovelace_path = Path(HA_CONFIG_DIR) / "ui-lovelace.yaml"
+                if did == "lovelace" and lovelace_path.exists():
+                    return lovelace_path.read_text()
+                return json.dumps({"error": f"Could not load dashboard '{did}': {str(e)}. Try ha_get_dashboards to list available dashboards."})
 
         elif name == "ha_update_dashboard":
             did = inp.get("dashboard_id", "lovelace")

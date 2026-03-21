@@ -13,7 +13,7 @@ if [ -f "$OPTIONS" ]; then
     export OPENAI_API_KEY=$(python3 -c "import json; print(json.load(open('$OPTIONS')).get('openai_api_key',''))")
     export OPENAI_MODEL=$(python3 -c "import json; print(json.load(open('$OPTIONS')).get('openai_model','gpt-4o'))")
     export ANTHROPIC_API_KEY=$(python3 -c "import json; print(json.load(open('$OPTIONS')).get('anthropic_api_key',''))")
-    export ANTHROPIC_MODEL=$(python3 -c "import json; print(json.load(open('$OPTIONS')).get('anthropic_model','claude-sonnet-4-20250514'))")
+    export ANTHROPIC_MODEL=$(python3 -c "import json; print(json.load(open('$OPTIONS')).get('anthropic_model','claude-sonnet-4-6-20250627'))")
     export OLLAMA_URL=$(python3 -c "import json; print(json.load(open('$OPTIONS')).get('ollama_url',''))")
     export OLLAMA_MODEL=$(python3 -c "import json; print(json.load(open('$OPTIONS')).get('ollama_model','llama3.1'))")
 else

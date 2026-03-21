@@ -1,7 +1,7 @@
 # HA AI Programmer — Home Assistant Add-on
 name: "AI Programmer"
 description: "Natural-language Home Assistant programmer powered by AI. Create automations, dashboards, blueprints, install HACS repos, and edit YAML configs — all through chat."
-version: "1.1.8"
+version: "1.2.1"
 slug: "ai_programmer"
 url: "https://github.com/f3rrand/ha-ai-programmer"
 arch:
@@ -32,7 +32,11 @@ options:
   ollama_url: ""
   ollama_model: "llama3.1"
 schema:
-  ai_provider: str
+  ai_provider:
+    - "gemini"
+    - "openai"
+    - "anthropic"
+    - "ollama"
   gemini_api_key: str
   gemini_model: str
   openai_api_key: str

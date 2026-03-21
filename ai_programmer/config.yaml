@@ -32,11 +32,7 @@ options:
   ollama_url: ""
   ollama_model: "llama3.1"
 schema:
-  ai_provider:
-    - "gemini"
-    - "openai"
-    - "anthropic"
-    - "ollama"
+  ai_provider: "list(gemini|openai|anthropic|ollama)"
   gemini_api_key: str
   gemini_model: str
   openai_api_key: str
